@@ -1,0 +1,616 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  KeyName:
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: my-new-key
+  InstanceType:
+    Type: String
+    Default: t2.micro
+Resources:
+  MySNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: 'MySNSDisplayName'
+      TopicName: 'test'
+  SNSTopicPolicy:
+   Type: AWS::SNS::TopicPolicy
+   Properties:
+    PolicyDocument:
+      Version: "2008-10-17"
+      Id: "__default_policy_ID"
+      Statement:
+      - Sid: "__default_statement_ID"
+        Effect: "Allow"
+        Principal:
+          AWS: "*"
+        Action: 
+         - "SNS:GetTopicAttributes"
+         - "SNS:SetTopicAttributes"
+         - "SNS:AddPermission"
+         - "SNS:RemovePermission"
+         - "SNS:DeleteTopic"
+         - "SNS:Subscribe"
+         - "SNS:ListSubscriptionsByTopic"
+         - "SNS:Publish"
+        Resource: !Ref MySNSTopic
+    Topics:
+     - !Ref MySNSTopic
+  MySNSTopicSubscription:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      Protocol: 'email'
+      TopicArn: !Ref MySNSTopic
+      Endpoint: 'jn270099@dal.ca' 
+  
+  MyS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DependsOn:
+     - SNSTopicPolicy
+    Properties:
+      BucketName: my-test-bucket-cloud-lamda1
+      NotificationConfiguration:
+        TopicConfigurations:
+          - Topic: !Ref MySNSTopic
+            Event: 's3:ObjectCreated:*'
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+  FederationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "ID"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "ID"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      TableName: user_data_table
+  MyLambdaFunction1:
+    Type: 'AWS::Lambda::Function'
+    DependsOn:
+     - FederationTable
+    Properties:
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::941132372407:role/LabRole
+      FunctionName: lamda_cloud_function
+      Runtime: python3.8
+      Timeout: 30
+      Code:
+        ZipFile: |
+            import boto3
+            import json
+            from botocore.exceptions import ClientError
+            dynamodb = boto3.resource('dynamodb')
+            table = dynamodb.Table('user_data_table')
+            s3 = boto3.client('s3')
+            def lambda_handler(event, context):
+              try:
+               content = json.loads(event.get('body'))
+               username = content.get('name') 
+               email = content.get('email')
+               phone_number=content.get('phone')
+               designation = content.get('designation')
+               years_of_exp = content.get('yearOfExperience')
+               gender = content.get('gender')
+               current_location = content.get('currentLocation')
+               preferred_location = content.get('preferredLocation')
+               table.put_item(Item={
+               'ID': email,
+               'username': username,
+               'PhoneNumber': phone_number,
+               'email': email,
+               'Designation': designation,
+               'YearsOfExp': years_of_exp,
+               'Gender': gender,
+               'CurrentLocation': current_location,
+               'PreferredLocation': preferred_location
+                })
+               return {          
+                 'statusCode': 200,
+                 'headers': {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Methods': 'POST, PUT, PATCH, GET, DELETE, OPTIONS',
+                  'Access-Control-Allow-Headers': '*'
+                  },
+                  'body': json.dumps({'message': 'Successfully submitted '}),
+                }
+              except ClientError as e:
+               return {
+                'statusCode': 500,
+                'body': json.dumps({'error': str(e)}),
+              }
+
+  MyLambdaFunction2:
+    Type: 'AWS::Lambda::Function'
+    DependsOn:
+     - MyS3Bucket
+    Properties:
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::941132372407:role/LabRole
+      FunctionName: lamda_s3_cloud_function
+      Runtime: python3.8
+      Timeout: 30
+      Code:
+        ZipFile: |  
+          import json
+          import base64
+          import boto3 # AWS SDK for Python, used to access S3
+          import random
+          import string
+          def lambda_handler(event, context):
+           s3 = boto3.client("s3")
+           get_file_content = event.get('body')
+           decode_content = base64.b64decode(get_file_content)
+           filename = event['queryStringParameters']['filename']  # Get the filename from queryStringParameters
+           s3_upload = s3.put_object(Bucket="my-test-bucket-cloud-lamda1", Key=filename, Body=decode_content)  # Append filename to the Key
+           return {
+              'statusCode': 200,
+              'headers': {
+               'Access-Control-Allow-Origin': '*',
+               'Access-Control-Allow-Methods': 'POST, PUT, PATCH, GET, DELETE, OPTIONS',
+               'Access-Control-Allow-Headers': '*'
+              },
+              'body': json.dumps(event)
+            }
+  MyApiGateway1:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: myApiGateway_dynamo_db
+
+  MyApiGatewayResource1:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt MyApiGateway1.RootResourceId
+      RestApiId: !Ref MyApiGateway1
+      PathPart: 'myresource'
+  OptionsMethod1:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref MyApiGateway1
+      ResourceId: !Ref MyApiGatewayResource1
+      HttpMethod: OPTIONS
+      Integration:
+        Type: MOCK
+        IntegrationHttpMethod: POST          
+        IntegrationResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'*'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin:  "'*'"
+          ResponseTemplates:
+            application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'    
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false        
+          ResponseModels:
+            application/json: 'Empty'
+ 
+  MyApiGatewayMethod1:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref MyApiGatewayResource1
+      RestApiId: !Ref MyApiGateway1
+      Integration:
+        IntegrationHttpMethod: POST            
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+          - lambdaArn: !GetAtt MyLambdaFunction1.Arn
+      MethodResponses:
+        - StatusCode: 200
+  ApiDeployment1:
+     Type: AWS::ApiGateway::Deployment    
+     DependsOn:
+      - MyApiGatewayMethod1
+     Properties:
+      RestApiId: !Ref MyApiGateway1
+  lambdaApiGatewayInvoke1:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+     - Stage1
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt MyLambdaFunction1.Arn
+      Principal: apigateway.amazonaws.com
+      # note: if route *not* at API Gateway root, `SourceArn` would take the form of:
+      #               arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${apiGateway}/${apiGatewayStageName}/${apiGatewayHTTPMethod}/PATH_PART
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MyApiGateway1}/*/*/*   
+    
+  Stage1:
+     Type: AWS::ApiGateway::Stage
+     DependsOn:
+      - ApiDeployment1
+     Properties:
+      StageName: !Sub 'v1'
+      RestApiId: !Ref MyApiGateway1
+      DeploymentId: !Ref ApiDeployment1
+  MyApiGateway2:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      BinaryMediaTypes:
+       - '*/*'
+      Name: myApiGateway_s3_upload
+
+  MyApiGatewayResource2:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt MyApiGateway2.RootResourceId
+      RestApiId: !Ref MyApiGateway2
+      PathPart: 'upload'
+
+  OptionsMethod2:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref MyApiGateway2
+      ResourceId: !Ref MyApiGatewayResource2
+      HttpMethod: OPTIONS
+      Integration:
+        Type: MOCK
+        IntegrationHttpMethod: POST          
+        IntegrationResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'*'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin:  "'*'"
+          ResponseTemplates:
+            application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'    
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false        
+          ResponseModels:
+            application/json: 'Empty'
+ 
+  MyApiGatewayMethod2:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref MyApiGatewayResource2
+      RestApiId: !Ref MyApiGateway2
+      Integration:
+        IntegrationHttpMethod: POST            
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+          - lambdaArn: !GetAtt MyLambdaFunction2.Arn
+      MethodResponses:
+        - StatusCode: 200
+
+
+  ApiDeployment2:
+     Type: AWS::ApiGateway::Deployment    
+     DependsOn:
+      - MyApiGatewayMethod2
+     Properties:
+      RestApiId: !Ref MyApiGateway2
+  lambdaApiGatewayInvoke2:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+     - Stage2
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt MyLambdaFunction2.Arn
+      Principal: apigateway.amazonaws.com
+      # note: if route *not* at API Gateway root, `SourceArn` would take the form of:
+      #               arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${apiGateway}/${apiGatewayStageName}/${apiGatewayHTTPMethod}/PATH_PART
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MyApiGateway2}/*/*/*   
+   
+
+  Stage2:
+     Type: AWS::ApiGateway::Stage
+     DependsOn:
+      - ApiDeployment2
+     Properties:
+      StageName: !Sub 'v1'
+      RestApiId: !Ref MyApiGateway2
+      DeploymentId: !Ref ApiDeployment2   
+  MyWebServerInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: ami-0fc5d935ebf8bc3bc
+      Tags:
+        - Key: Name
+          Value: test-ec2
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          apt-get update -y
+          apt-get install -y apache2
+          systemctl start apache2
+          systemctl enable apache2
+          sudo rm -rf /var/www/html/index.html
+          sudo touch /var/www/html/index.html
+          cat <<EOF >> /var/www/html/index.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Submit User Registration Form</title>
+          <style>
+          * {
+            padding-top: 1px;
+          }
+
+          body {
+          font-family: 'Arial', sans-serif;
+          background-color: #f4f4f4;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          /* height: 100vh; */
+          }
+
+          h2 {
+          color: #333;
+          }
+
+          form {
+          background-color: #fff;
+          padding: 20px;
+          border-radius: 8px;
+          box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+          margin-bottom: 20px;
+          }
+
+          label {
+          display: block;
+          margin-bottom: 8px;
+          color: #555;
+          }
+
+          input {
+          width: 500px;
+          padding: 15px;
+          margin-bottom: 16px;
+          box-sizing: border-box;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          }
+
+          select {
+           width: 500px;
+           padding: 15px;
+           margin-bottom: 16px;
+           box-sizing: border-box;
+           border: 1px solid #ccc;
+           border-radius: 4px;
+          }
+          button {
+          background-color: #4caf50;
+          color: #fff;
+          padding: 10px 20px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          }
+
+          button:hover {
+          background-color: #45a049;
+          }
+
+          input[type='file'] {
+           margin-top: 4px; /* Adjust margin for file input */
+          }
+          </style>
+          </head>
+          <body>
+           <!-- <h2>Submit User Registration Form</h2> -->
+          <h2>Tech Solutions pvt. ltd.</h2>
+
+          <form id="userRegistrationForm" onsubmit="return submitResume(event)">
+          <label for="username">Name:</label>
+          <input type="text" id="name" name="name" required /><br />
+
+          <label for="email">Email:</label>
+          <input type="email" id="email" name="email" /><br />
+  
+          <label for="name">Phone Number:</label>
+          <input type="text" id="phone" name="name" /><br />
+
+          <label for="name">Designation:</label>
+          <input type="text" id="designation" name="name" /><br />
+
+          <label for="name">Years of Exp:</label>
+          <input type="number" id="exp" name="name" /><br />
+
+          <label for="gender">Gender:</label>
+          <select name="gender" id="genderSelect">
+          <option></option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+          </select>
+
+          <label for="name">Current Location:</label>
+          <input type="text" id="current_location" name="name" /><br />
+
+          <label for="name">Preferred Location:</label>
+          <input type="text" id="preferred_location" name="name" /><br />
+
+          <label for="file">Upload File:</label>
+          <input
+          type="file"
+          id="file"
+          name="file"
+          accept=".txt, .pdf, .doc, .docx"
+          required
+          /><br />
+
+          <button type="submit">Submit</button>
+          </form>
+
+          <script>
+          async function submitForm() {
+          let data = {
+          name: document.getElementById('name').value,
+          email: document.getElementById('email').value,
+          phone: document.getElementById('phone').value,
+          designation: document.getElementById('designation').value,
+          yearOfExperience: document.getElementById('exp').value,
+          gender: document.getElementById('genderSelect').value,
+          currentLocation: document.getElementById('current_location').value,
+          preferredLocation: document.getElementById('preferred_location').value
+          }
+          console.log('User Registration Data:', data)
+          fetch(
+          'https://${MyApiGateway1}.execute-api.${AWS::Region}.amazonaws.com/v1/myresource',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+          )
+          .then(response => response.json())
+          .then(data => {
+            console.log('User Registration Success:', data)
+            alert('User registration successful!')
+          })
+          .catch(error => {
+            console.error('User Registration Error:', error)
+            alert('User registration failed. Please try again.')
+          })
+          }
+          async function uploadFile() {
+          var fileInput = document.getElementById('file')
+          if (fileInput.files.length > 0) {
+          var file = fileInput.files[0]
+
+          // Prepare data for file upload API request
+          var formData = new FormData()
+          formData.append('file', file) // Include the file in binary format with the given file name
+          var filename = formData.get('file').name
+
+          console.log(filename)
+          console.log('File Upload Form Data:', formData.get('file'))
+
+          // Make API request for file upload
+           fetch(
+            'https://${MyApiGateway2}.execute-api.${AWS::Region}.amazonaws.com/v1/upload?filename=' +
+              filename,
+              {
+               method: 'POST',
+               body: formData,
+               headers: {
+                'Content-Type': 'multipart/form-data'
+                }
+                }
+               )
+             .then(response => response.json())
+             .then(data => {
+              console.log('File Upload Success:', data)
+              alert('File upload successful!')
+              })
+            .catch(error => {
+              console.error('File Upload Error:', error)
+              alert('File upload failed. Please try again.')
+            })
+           } else {
+          alert('Please select a file')
+          }
+          }
+          async function submitResume(event) {
+          event.preventDefault()
+          submitForm()
+          uploadFile()
+          }
+          </script>
+          </body>
+          </html>
+          EOF
+          sudo systemctl restart apache2.service
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: default
+        BackupPlanRule:
+          - RuleName: daily-backups
+            TargetBackupVault: !Ref 'BackupVault'
+            ScheduleExpression: cron(0 5 ? * * *)
+            StartWindowMinutes: 60
+            Lifecycle:
+              DeleteAfterDays: 60
+
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: default
+      EncryptionKeyArn: !GetAtt BackupVaultKey.Arn
+
+  BackupVaultKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Encryption key for daily
+      Enabled: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action:
+              - kms:*
+            Resource: '*'
+
+  BackupVaultKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/cmk/backup
+      TargetKeyId: !Ref 'BackupVaultKey'
+
+
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupSelection:
+        SelectionName: daily-backup-tag
+        IamRoleArn: arn:aws:iam::941132372407:role/LabRole
+        ListOfTags:
+          - ConditionType: STRINGEQUALS
+            ConditionKey: backup
+            ConditionValue: daily
+      BackupPlanId: !Ref 'BackupPlan'       
+Outputs:
+  MyEC2InstanceId:
+    Description: 'ID of the EC2 instance'
+    Value: !Ref MyEC2Instance
+Outputs:
+  MyApiGatewayInvokeURL:
+    Description: 'Invoke URL of the API Gateway'
+    Value: !Sub 'https://${MyApiGateway1}.execute-api.${AWS::Region}.amazonaws.com/v1/myresource'
+Outputs:
+  MyApiGatewayInvokeURL:
+    Description: 'Invoke URL of the API Gateway'
+    Value: !Sub 'https://${MyApiGateway2}.execute-api.${AWS::Region}.amazonaws.com/v1/upload'    

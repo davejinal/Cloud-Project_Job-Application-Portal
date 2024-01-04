@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Submit User Registration Form</title>
+<style>
+* {
+  padding-top: 1px;
+}
+
+body {
+font-family: 'Arial', sans-serif;
+background-color: #f4f4f4;
+margin: 0;
+padding: 0;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+/* height: 100vh; */
+}
+
+h2 {
+color: #333;
+}
+
+form {
+background-color: #fff;
+padding: 20px;
+border-radius: 8px;
+box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+margin-bottom: 20px;
+}
+
+label {
+display: block;
+margin-bottom: 8px;
+color: #555;
+}
+
+input {
+width: 500px;
+padding: 15px;
+margin-bottom: 16px;
+box-sizing: border-box;
+border: 1px solid #ccc;
+border-radius: 4px;
+}
+
+select {
+ width: 500px;
+ padding: 15px;
+ margin-bottom: 16px;
+ box-sizing: border-box;
+ border: 1px solid #ccc;
+ border-radius: 4px;
+}
+button {
+background-color: #4caf50;
+color: #fff;
+padding: 10px 20px;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+}
+
+button:hover {
+background-color: #45a049;
+}
+
+input[type='file'] {
+ margin-top: 4px; /* Adjust margin for file input */
+}
+</style>
+</head>
+<body>
+ <!-- <h2>Submit User Registration Form</h2> -->
+<h2>Tech Solutions pvt. ltd.</h2>
+
+<form id="userRegistrationForm" onsubmit="return submitResume(event)">
+<label for="username">Name:</label>
+<input type="text" id="name" name="name" required /><br />
+
+<label for="email">Email:</label>
+<input type="email" id="email" name="email" /><br />
+
+<label for="name">Phone Number:</label>
+<input type="text" id="phone" name="name" /><br />
+
+<label for="name">Designation:</label>
+<input type="text" id="designation" name="name" /><br />
+
+<label for="name">Years of Exp:</label>
+<input type="number" id="exp" name="name" /><br />
+
+<label for="gender">Gender:</label>
+<select name="gender" id="genderSelect">
+<option></option>
+<option value="Male">Male</option>
+<option value="Female">Female</option>
+</select>
+
+<label for="name">Current Location:</label>
+<input type="text" id="current_location" name="name" /><br />
+
+<label for="name">Preferred Location:</label>
+<input type="text" id="preferred_location" name="name" /><br />
+
+<label for="file">Upload File:</label>
+<input
+type="file"
+id="file"
+name="file"
+accept=".txt, .pdf, .doc, .docx"
+required
+/><br />
+
+<button type="submit">Submit</button>
+</form>
+
+<script>
+async function submitForm() {
+let data = {
+name: document.getElementById('name').value,
+email: document.getElementById('email').value,
+phone: document.getElementById('phone').value,
+designation: document.getElementById('designation').value,
+yearOfExperience: document.getElementById('exp').value,
+gender: document.getElementById('genderSelect').value,
+currentLocation: document.getElementById('current_location').value,
+preferredLocation: document.getElementById('preferred_location').value
+}
+console.log('User Registration Data:', data)
+fetch(
+'https://${MyApiGateway1}.execute-api.${AWS::Region}.amazonaws.com/v1/myresource',
+{
+  method: 'POST',
+  body: JSON.stringify(data),
+  headers: {
+    'Content-Type': 'application/json'
+  }
+}
+)
+.then(response => response.json())
+.then(data => {
+  console.log('User Registration Success:', data)
+  alert('User registration successful!')
+})
+.catch(error => {
+  console.error('User Registration Error:', error)
+  alert('User registration failed. Please try again.')
+})
+}
+async function uploadFile() {
+var fileInput = document.getElementById('file')
+if (fileInput.files.length > 0) {
+var file = fileInput.files[0]
+
+// Prepare data for file upload API request
+var formData = new FormData()
+formData.append('file', file) // Include the file in binary format with the given file name
+var filename = formData.get('file').name
+
+console.log(filename)
+console.log('File Upload Form Data:', formData.get('file'))
+
+// Make API request for file upload
+ fetch(
+  'https://${MyApiGateway2}.execute-api.${AWS::Region}.amazonaws.com/v1/upload?filename=' +
+    filename,
+    {
+     method: 'POST',
+     body: formData,
+     headers: {
+      'Content-Type': 'multipart/form-data'
+      }
+      }
+     )
+   .then(response => response.json())
+   .then(data => {
+    console.log('File Upload Success:', data)
+    alert('File upload successful!')
+    })
+  .catch(error => {
+    console.error('File Upload Error:', error)
+    alert('File upload failed. Please try again.')
+  })
+ } else {
+alert('Please select a file')
+}
+}
+async function submitResume(event) {
+event.preventDefault()
+submitForm()
+uploadFile()
+}
+</script>
+</body>
+</html>
