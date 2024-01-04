@@ -9,3 +9,6 @@
 
 # Treat PNG files as binary - no language highlighting
 *.png binary
+
+# Force Linguist to detect languages for all files
+* linguist-detectable
