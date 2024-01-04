@@ -1,0 +1,11 @@
+# Set HTML files to be recognized as HTML
+*.html linguist-language=HTML
+
+# Set Python files to be recognized as Python
+*.py linguist-language=Python
+
+# Set YAML files to be recognized as YAML
+*.yaml linguist-language=YAML
+
+# Treat PNG files as binary - no language highlighting
+*.png binary
